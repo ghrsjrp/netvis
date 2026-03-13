@@ -1,0 +1,60 @@
+version: '3.9'
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: netvis
+      POSTGRES_PASSWORD: netvis
+      POSTGRES_DB: netvis
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"   # expõe só no loopback do host
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U netvis"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"   # expõe só no loopback do host
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    network_mode: host            # usa rede do host — enxerga Tailscale/VPN
+    environment:
+      DATABASE_URL: postgresql://netvis:netvis@127.0.0.1:5432/netvis
+      REDIS_URL: redis://127.0.0.1:6379/0
+      SECRET_KEY: ${SECRET_KEY:-changeme-set-in-production}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./backend:/app
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./certs:/etc/ssl/netvis:ro
+
+volumes:
+  postgres_data:
+  redis_data:
